@@ -1,0 +1,93 @@
+name: Hourly Weather Snapshot (IST – Safe)
+
+on:
+  schedule:
+    - cron: "0 * * * *"
+  workflow_dispatch:
+
+jobs:
+  collect-weather:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Fetch & store weather safely (IST)
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          for i in 1 2 3; do
+            RAW=$(curl -fsS "https://api.ambientweather.net/v1/devices?apiKey=${{ secrets.API_KEY }}&applicationKey=${{ secrets.APP_KEY }}") && break
+            sleep 10
+          done
+
+          if [ -z "$RAW" ] || [ "$RAW" = "[]" ]; then
+            echo "Empty API response"
+            exit 1
+          fi
+
+          SENSOR_DATE=$(echo "$RAW" | jq -r '.[0].lastData.date')
+          [ "$SENSOR_DATE" = "null" ] && exit 1
+
+          IST_DATE=$(date -d "$SENSOR_DATE +5 hours 30 minutes" +"%Y-%m-%d")
+          IST_HOUR=$(date -d "$SENSOR_DATE +5 hours 30 minutes" +"%H")
+
+          DIR="data/device/hourly/$IST_DATE"
+          FILE="$DIR/$IST_HOUR-00.json"
+
+          mkdir -p "$DIR"
+
+          if [ -f "$FILE" ]; then
+            echo "Hour already exists"
+            exit 0
+          fi
+
+          echo "$RAW" | jq '.[0].lastData | {
+            timestamp: .date,
+            source: "ambientweather-api",
+
+            outdoor: {
+              temperature: ((.tempf - 32) * 5 / 9),
+              feelsLike: ((.feelsLike - 32) * 5 / 9),
+              dewPoint: ((.dewPoint - 32) * 5 / 9),
+              humidity: .humidity
+            },
+
+            wind: {
+              speed: (.windspeedmph * 1.60934),
+              gust: (.windgustmph * 1.60934),
+              maxDailyGust: (.maxdailygust * 1.60934),
+              directionDeg: .winddir
+            },
+
+            rain: {
+              hourly: (.hourlyrainin * 25.4),
+              daily: (.dailyrainin * 25.4),
+              weekly: (.weeklyrainin * 25.4)
+            },
+
+            pressure: {
+              relative: (.baromrelin * 33.8639),
+              absolute: (.baromabsin * 33.8639)
+            },
+
+            indoor: {
+              temperature: ((.tempinf - 32) * 5 / 9),
+              humidity: .humidityin
+            },
+
+            solar: {
+              uv: .uv,
+              radiation: .solarradiation
+            }
+          }' > "$FILE"
+
+      - name: Commit and push
+        run: |
+          git config user.name "goodearth-weather-bot"
+          git config user.email "weather-bot@goodearth.internal"
+          git add data/device/hourly
+          git commit -m "Hourly weather snapshot (IST)" || echo "No changes"
+          git push
