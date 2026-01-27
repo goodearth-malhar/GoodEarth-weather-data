@@ -1,8 +1,8 @@
-name: Hourly Weather Snapshot (IST – Safe)
+name: Hourly Weather Snapshot (IST – Guaranteed)
 
 on:
   schedule:
-    - cron: "0 * * * *"
+    - cron: "0 * * * *"   # every hour UTC
   workflow_dispatch:
 
 jobs:
@@ -13,81 +13,121 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Fetch & store weather safely (IST)
+      - name: Fetch & guarantee hourly data (IST)
         shell: bash
         run: |
           set -euo pipefail
 
+          # ===============================
+          # 1️⃣ FETCH API (retry-safe)
+          # ===============================
+          RAW=""
           for i in 1 2 3; do
             RAW=$(curl -fsS "https://api.ambientweather.net/v1/devices?apiKey=${{ secrets.API_KEY }}&applicationKey=${{ secrets.APP_KEY }}") && break
             sleep 10
           done
 
+          # Allow pipeline to continue even if API fails
+          API_OK=true
           if [ -z "$RAW" ] || [ "$RAW" = "[]" ]; then
-            echo "Empty API response"
-            exit 1
+            echo "⚠️ API unavailable – using carry-forward"
+            API_OK=false
           fi
 
-          SENSOR_DATE=$(echo "$RAW" | jq -r '.[0].lastData.date')
-          [ "$SENSOR_DATE" = "null" ] && exit 1
+          # ===============================
+          # 2️⃣ CURRENT IST HOUR (SOURCE OF TRUTH)
+          # ===============================
+          NOW_IST=$(date -u +"%Y-%m-%d %H:%M:%S")
+          CUR_DATE=$(date -d "$NOW_IST +5 hours 30 minutes" +"%Y-%m-%d")
+          CUR_HOUR=$(date -d "$NOW_IST +5 hours 30 minutes" +"%H")
+          CUR_TS=$(date -d "$CUR_DATE $CUR_HOUR:00" +%s)
 
-          IST_DATE=$(date -d "$SENSOR_DATE +5 hours 30 minutes" +"%Y-%m-%d")
-          IST_HOUR=$(date -d "$SENSOR_DATE +5 hours 30 minutes" +"%H")
+          # ===============================
+          # 3️⃣ FIND LAST STORED HOUR
+          # ===============================
+          LAST_FILE=$(ls data/device/hourly/*/*-00.json 2>/dev/null | sort | tail -n 1 || true)
 
-          DIR="data/device/hourly/$IST_DATE"
-          FILE="$DIR/$IST_HOUR-00.json"
-
-          mkdir -p "$DIR"
-
-          if [ -f "$FILE" ]; then
-            echo "Hour already exists"
-            exit 0
+          if [ -n "$LAST_FILE" ]; then
+            LAST_DATE=$(basename "$(dirname "$LAST_FILE")")
+            LAST_HOUR=$(basename "$LAST_FILE" | cut -d'-' -f1)
+            LAST_TS=$(date -d "$LAST_DATE $LAST_HOUR:00" +%s)
+            LAST_JSON=$(cat "$LAST_FILE")
+          else
+            LAST_TS=$((CUR_TS - 3600))
+            LAST_JSON=""
           fi
 
-          echo "$RAW" | jq '.[0].lastData | {
-            timestamp: .date,
-            source: "ambientweather-api",
+          # ===============================
+          # 4️⃣ LOOP — GUARANTEE EVERY HOUR
+          # ===============================
+          TS=$LAST_TS
 
-            outdoor: {
-              temperature: ((.tempf - 32) * 5 / 9),
-              feelsLike: ((.feelsLike - 32) * 5 / 9),
-              dewPoint: ((.dewPoint - 32) * 5 / 9),
-              humidity: .humidity
-            },
+          while [ $TS -lt $CUR_TS ]; do
+            TS=$((TS + 3600))
 
-            wind: {
-              speed: (.windspeedmph * 1.60934),
-              gust: (.windgustmph * 1.60934),
-              maxDailyGust: (.maxdailygust * 1.60934),
-              directionDeg: .winddir
-            },
+            D=$(date -d "@$TS" +"%Y-%m-%d")
+            H=$(date -d "@$TS" +"%H")
 
-            rain: {
-              hourly: (.hourlyrainin * 25.4),
-              daily: (.dailyrainin * 25.4),
-              weekly: (.weeklyrainin * 25.4)
-            },
+            DIR="data/device/hourly/$D"
+            FILE="$DIR/$H-00.json"
+            mkdir -p "$DIR"
 
-            pressure: {
-              relative: (.baromrelin * 33.8639),
-              absolute: (.baromabsin * 33.8639)
-            },
+            if [ -f "$FILE" ]; then
+              echo "✔ Exists $FILE"
+              continue
+            fi
 
-            indoor: {
-              temperature: ((.tempinf - 32) * 5 / 9),
-              humidity: .humidityin
-            },
+            echo "➕ Creating $FILE"
 
-            solar: {
-              uv: .uv,
-              radiation: .solarradiation
-            }
-          }' > "$FILE"
+            if [ "$API_OK" = true ]; then
+              echo "$RAW" | jq '.[0].lastData | {
+                timestamp: .date,
+                source: "ambientweather-api",
+
+                outdoor: {
+                  temperature: ((.tempf - 32) * 5 / 9),
+                  feelsLike: ((.feelsLike - 32) * 5 / 9),
+                  dewPoint: ((.dewPoint - 32) * 5 / 9),
+                  humidity: .humidity
+                },
+
+                wind: {
+                  speed: (.windspeedmph * 1.60934),
+                  gust: (.windgustmph * 1.60934),
+                  maxDailyGust: (.maxdailygust * 1.60934),
+                  directionDeg: .winddir
+                },
+
+                rain: {
+                  hourly: (.hourlyrainin * 25.4),
+                  daily: (.dailyrainin * 25.4),
+                  weekly: (.weeklyrainin * 25.4)
+                },
+
+                pressure: {
+                  relative: (.baromrelin * 33.8639),
+                  absolute: (.baromabsin * 33.8639)
+                },
+
+                indoor: {
+                  temperature: ((.tempinf - 32) * 5 / 9),
+                  humidity: .humidityin
+                },
+
+                solar: {
+                  uv: .uv,
+                  radiation: .solarradiation
+                }
+              }' > "$FILE"
+            else
+              echo "$LAST_JSON" | jq '. + { source: "carry-forward" }' > "$FILE"
+            fi
+          done
 
       - name: Commit and push
         run: |
           git config user.name "goodearth-weather-bot"
           git config user.email "weather-bot@goodearth.internal"
           git add data/device/hourly
-          git commit -m "Hourly weather snapshot (IST)" || echo "No changes"
+          git commit -m "Guaranteed hourly weather snapshot (IST)" || echo "No changes"
           git push
