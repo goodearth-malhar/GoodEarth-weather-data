@@ -1,36 +1,34 @@
 {
-  "timestamp": "2026-01-24T06:00:00+05:30",
-  "source": "sheet-backfill",
+  "bucketHour": "2026-01-24 06:00",
+  "timestamp": "2026-01-24T06:00:00",
+  "source": "google-sheet-backfill",
   "outdoor": {
-    "temperature": 17.4,
-    "feelsLike": 17.4,
+    "temperature": 17.3,
+    "feelsLike": 17.3,
     "dewPoint": 14.0,
-    "humidity": 80.0
+    "humidity": 81
   },
   "wind": {
-    "speed": 0.2,
-    "gust": 1.8,
+    "speed": 0.0,
+    "gust": 0.0,
     "maxDailyGust": 18.4,
     "directionDeg": 205
   },
   "rain": {
     "hourly": 0.0,
     "daily": 0.0,
-    "weekly": 0.0,
-    "monthly": 1.0,
-    "yearly": 324.9,
-    "total": 324.9
+    "weekly": 0.0
   },
   "pressure": {
-    "relative": 1022.1,
-    "absolute": 931.6
-  },
-  "solar": {
-    "uv": 0,
-    "radiation": 2.0
+    "relative": 1022.4,
+    "absolute": 931.9
   },
   "indoor": {
     "temperature": 23.6,
-    "humidity": 56.0
+    "humidity": 56
+  },
+  "solar": {
+    "uv": 0.0,
+    "radiation": 4.0
   }
 }

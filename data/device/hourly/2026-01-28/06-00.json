@@ -1,0 +1,34 @@
+{
+  "bucketHour": "2026-01-28 06:00",
+  "timestamp": "2026-01-28T06:00:00",
+  "source": "google-sheet-backfill",
+  "outdoor": {
+    "temperature": 17.7,
+    "feelsLike": 17.7,
+    "dewPoint": 12.8,
+    "humidity": 73
+  },
+  "wind": {
+    "speed": 0.0,
+    "gust": 0.0,
+    "maxDailyGust": 14.8,
+    "directionDeg": 177
+  },
+  "rain": {
+    "hourly": 0.0,
+    "daily": 0.0,
+    "weekly": 0.0
+  },
+  "pressure": {
+    "relative": 1022.2,
+    "absolute": 931.7
+  },
+  "indoor": {
+    "temperature": 23.7,
+    "humidity": 57
+  },
+  "solar": {
+    "uv": 0.0,
+    "radiation": 3.8
+  }
+}

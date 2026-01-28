@@ -1,33 +1,34 @@
 {
-  "timestamp": "2026-01-28T06:32:00.000Z",
-  "source": "ambientweather-api",
+  "bucketHour": "2026-01-28 03:00",
+  "timestamp": "2026-01-28T03:00:00",
+  "source": "google-sheet-backfill",
   "outdoor": {
-    "temperature": 28.111111111111107,
-    "feelsLike": 27.694444444444443,
-    "dewPoint": 12.833333333333334,
-    "humidity": 39
+    "temperature": 18.3,
+    "feelsLike": 18.3,
+    "dewPoint": 13.6,
+    "humidity": 74
   },
   "wind": {
-    "speed": 7.9179528,
-    "gust": 9.3663588,
-    "maxDailyGust": 16.5601086,
-    "directionDeg": 83
+    "speed": 0.4,
+    "gust": 1.8,
+    "maxDailyGust": 14.8,
+    "directionDeg": 217
   },
   "rain": {
-    "hourly": 0,
-    "daily": 0,
-    "weekly": 0
+    "hourly": 0.0,
+    "daily": 0.0,
+    "weekly": 0.0
   },
   "pressure": {
-    "relative": 1022.2156854,
-    "absolute": 931.6974807
+    "relative": 1021.3,
+    "absolute": 930.8
   },
   "indoor": {
-    "temperature": 25.27777777777778,
-    "humidity": 48
+    "temperature": 23.8,
+    "humidity": 58
   },
   "solar": {
-    "uv": 5,
-    "radiation": 568.11
+    "uv": 0.0,
+    "radiation": 0.0
   }
 }
