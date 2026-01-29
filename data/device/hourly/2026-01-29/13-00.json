@@ -1,6 +1,6 @@
 {
-  "bucketHour": "2026-01-29 10:00",
-  "timestamp": "2026-01-29T10:00:00",
+  "bucketHour": "2026-01-29 13:00",
+  "timestamp": "2026-01-29T13:00:00",
   "source": "google-sheet-overwrite",
   "outdoor": {
     "temperature": 24.0,
@@ -28,7 +28,7 @@
     "humidity": 50
   },
   "solar": {
-    "uv": 3.0,
-    "radiation": 399.1
+    "uv": 3,
+    "radiation": 399.0
   }
 }
