@@ -2,7 +2,7 @@ name: Hourly Weather Snapshot (IST – Guaranteed)
 
 on:
   schedule:
-    - cron: "0 * * * *"   # every hour UTC
+    - cron: "0 * * * *"   # runs every hour (UTC), logic handles IST safely
   workflow_dispatch:
 
 jobs:
@@ -19,6 +19,21 @@ jobs:
           set -euo pipefail
 
           # ===============================
+          # 0️⃣ FORCE IST (SINGLE SOURCE OF TRUTH)
+          # ===============================
+          export TZ=Asia/Kolkata
+
+          NOW="$(date +"%Y-%m-%d %H:%M:%S")"
+          CUR_DATE="$(date +"%Y-%m-%d")"
+          CUR_HOUR="$(date +"%H")"
+          CUR_TS="$(date -d "$CUR_DATE $CUR_HOUR:00" +%s)"
+
+          echo "🕒 IST NOW      = $NOW"
+          echo "📅 CUR_DATE    = $CUR_DATE"
+          echo "⏰ CUR_HOUR    = $CUR_HOUR"
+          echo "🧭 CUR_TS      = $CUR_TS"
+
+          # ===============================
           # 1️⃣ FETCH API (retry-safe)
           # ===============================
           RAW=""
@@ -27,7 +42,6 @@ jobs:
             sleep 10
           done
 
-          # Allow pipeline to continue even if API fails
           API_OK=true
           if [ -z "$RAW" ] || [ "$RAW" = "[]" ]; then
             echo "⚠️ API unavailable – using carry-forward"
@@ -35,15 +49,7 @@ jobs:
           fi
 
           # ===============================
-          # 2️⃣ CURRENT IST HOUR (SOURCE OF TRUTH)
-          # ===============================
-          NOW_IST=$(date -u +"%Y-%m-%d %H:%M:%S")
-          CUR_DATE=$(date -d "$NOW_IST +5 hours 30 minutes" +"%Y-%m-%d")
-          CUR_HOUR=$(date -d "$NOW_IST +5 hours 30 minutes" +"%H")
-          CUR_TS=$(date -d "$CUR_DATE $CUR_HOUR:00" +%s)
-
-          # ===============================
-          # 3️⃣ FIND LAST STORED HOUR
+          # 2️⃣ FIND LAST STORED HOUR
           # ===============================
           LAST_FILE=$(ls data/device/hourly/*/*-00.json 2>/dev/null | sort | tail -n 1 || true)
 
@@ -52,17 +58,21 @@ jobs:
             LAST_HOUR=$(basename "$LAST_FILE" | cut -d'-' -f1)
             LAST_TS=$(date -d "$LAST_DATE $LAST_HOUR:00" +%s)
             LAST_JSON=$(cat "$LAST_FILE")
+
+            echo "🗂 LAST_FILE   = $LAST_FILE"
+            echo "⏱ LAST_TS     = $LAST_TS"
           else
             LAST_TS=$((CUR_TS - 3600))
             LAST_JSON=""
+            echo "ℹ️ No previous files found"
           fi
 
           # ===============================
-          # 4️⃣ LOOP — GUARANTEE EVERY HOUR
+          # 3️⃣ GUARANTEE EVERY HOUR
           # ===============================
           TS=$LAST_TS
 
-          while [ $TS -lt $CUR_TS ]; do
+          while [ "$TS" -lt "$CUR_TS" ]; do
             TS=$((TS + 3600))
 
             D=$(date -d "@$TS" +"%Y-%m-%d")
@@ -70,6 +80,7 @@ jobs:
 
             DIR="data/device/hourly/$D"
             FILE="$DIR/$H-00.json"
+
             mkdir -p "$DIR"
 
             if [ -f "$FILE" ]; then
@@ -120,7 +131,11 @@ jobs:
                 }
               }' > "$FILE"
             else
-              echo "$LAST_JSON" | jq '. + { source: "carry-forward" }' > "$FILE"
+              if [ -n "$LAST_JSON" ]; then
+                echo "$LAST_JSON" | jq '. + { source: "carry-forward" }' > "$FILE"
+              else
+                echo "❌ No data available to carry forward"
+              fi
             fi
           done
 
