@@ -24,4 +24,4 @@ Files are organized by date for easy access:
 
 
 ---
-*Maintained by the GoodEarth Weather Bot.*
+*Maintained by the GoodEarth Tarana.*
