@@ -1,148 +1,118 @@
-name: Hourly Weather Snapshot (IST – Guaranteed)
+name: Hourly Weather Average (IST - High Accuracy)
 
 on:
   schedule:
-    - cron: "0 * * * *"   # runs every hour (UTC), logic handles IST safely
+    # Runs at 5 minutes past every hour to ensure the previous hour's data is fully uploaded
+    - cron: "5 * * * *"
   workflow_dispatch:
 
 jobs:
-  collect-weather:
+  collect-average-weather:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Fetch & guarantee hourly data (IST)
-        shell: bash
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+
+      - name: Install Dependencies
+        run: pip install requests pytz
+
+      - name: Fetch and Average Data
+        env:
+          API_KEY: ${{ secrets.API_KEY }}
+          APP_KEY: ${{ secrets.APP_KEY }}
+          MAC: "BC:FF:4D:81:A7:64"
         run: |
-          set -euo pipefail
+          python - <<EOF
+          import requests, os, json
+          from datetime import datetime
+          import pytz
 
-          # ===============================
-          # 0️⃣ FORCE IST (SINGLE SOURCE OF TRUTH)
-          # ===============================
-          export TZ=Asia/Kolkata
+          # 1. Fetch last 60 minutes of data
+          url = f"https://api.ambientweather.net/v1/devices/{os.getenv('MAC')}?apiKey={os.getenv('API_KEY')}&applicationKey={os.getenv('APP_KEY')}&limit=60"
+          try:
+              response = requests.get(url)
+              data = response.json()
+          except Exception as e:
+              print(f"Error fetching data: {e}")
+              exit(1)
 
-          NOW="$(date +"%Y-%m-%d %H:%M:%S")"
-          CUR_DATE="$(date +"%Y-%m-%d")"
-          CUR_HOUR="$(date +"%H")"
-          CUR_TS="$(date -d "$CUR_DATE $CUR_HOUR:00" +%s)"
+          if not data or not isinstance(data, list):
+              print("No valid data list received")
+              exit(1)
 
-          echo "🕒 IST NOW      = $NOW"
-          echo "📅 CUR_DATE    = $CUR_DATE"
-          echo "⏰ CUR_HOUR    = $CUR_HOUR"
-          echo "🧭 CUR_TS      = $CUR_TS"
+          # 2. Validation Helper
+          # ignore_zeros=True will skip values <= 0 (Good for Temp/Humidity sensor errors)
+          # ignore_zeros=False allows 0 (Essential for Wind/Solar/Rain at night)
+          def get_clean_avg(key, ignore_zeros=True):
+              if ignore_zeros:
+                  values = [d[key] for d in data if key in d and d[key] is not None and d[key] > 0]
+              else:
+                  values = [d[key] for d in data if key in d and d[key] is not None]
+              return sum(values) / len(values) if values else 0
 
-          # ===============================
-          # 1️⃣ FETCH API (retry-safe)
-          # ===============================
-          RAW=""
-          for i in 1 2 3; do
-            RAW=$(curl -fsS "https://api.ambientweather.net/v1/devices?apiKey=${{ secrets.API_KEY }}&applicationKey=${{ secrets.APP_KEY }}") && break
-            sleep 10
-          done
+          # Unit Conversion Formulas
+          f_to_c = lambda f: (f - 32) * 5 / 9
+          m_to_k = lambda m: m * 1.60934
+          i_to_m = lambda i: i * 25.4
+          inhg_to_hpa = lambda p: p * 33.8639
 
-          API_OK=true
-          if [ -z "$RAW" ] || [ "$RAW" = "[]" ]; then
-            echo "⚠️ API unavailable – using carry-forward"
-            API_OK=false
-          fi
+          # 3. Process the Hourly Average
+          ist = pytz.timezone('Asia/Kolkata')
+          now = datetime.now(ist)
 
-          # ===============================
-          # 2️⃣ FIND LAST STORED HOUR
-          # ===============================
-          LAST_FILE=$(ls data/device/hourly/*/*-00.json 2>/dev/null | sort | tail -n 1 || true)
+          averaged_data = {
+              "timestamp": data[0].get('date'),
+              "source": "ambientweather-averaged-60min",
+              "outdoor": {
+                  "temperature": f_to_c(get_clean_avg('tempf')),
+                  "feelsLike": f_to_c(get_clean_avg('feelsLike')),
+                  "dewPoint": f_to_c(get_clean_avg('dewPoint')),
+                  "humidity": get_clean_avg('humidity')
+              },
+              "wind": {
+                  "speed": m_to_k(get_clean_avg('windspeedmph', ignore_zeros=False)),
+                  "gust": m_to_k(max([d.get('windgustmph', 0) for d in data])),
+                  "directionDeg": get_clean_avg('winddir', ignore_zeros=False)
+              },
+              "rain": {
+                  "hourly": i_to_m(data[0].get('hourlyrainin', 0)),
+                  "daily": i_to_m(data[0].get('dailyrainin', 0)),
+                  "weekly": i_to_m(data[0].get('weeklyrainin', 0))
+              },
+              "pressure": {
+                  "relative": inhg_to_hpa(get_clean_avg('baromrelin')),
+                  "absolute": inhg_to_hpa(get_clean_avg('baromabsin'))
+              },
+              "indoor": {
+                  "temperature": f_to_c(get_clean_avg('tempinf')),
+                  "humidity": get_clean_avg('humidityin')
+              },
+              "solar": {
+                  "uv": get_clean_avg('uv', ignore_zeros=False),
+                  "radiation": get_clean_avg('solarradiation', ignore_zeros=False)
+              }
+          }
 
-          if [ -n "$LAST_FILE" ]; then
-            LAST_DATE=$(basename "$(dirname "$LAST_FILE")")
-            LAST_HOUR=$(basename "$LAST_FILE" | cut -d'-' -f1)
-            LAST_TS=$(date -d "$LAST_DATE $LAST_HOUR:00" +%s)
-            LAST_JSON=$(cat "$LAST_FILE")
+          # 4. Save to the folder structure
+          date_str = now.strftime("%Y-%m-%d")
+          hour_str = now.strftime("%H-00")
+          path = f"data/device/hourly/{date_str}"
+          os.makedirs(path, exist_ok=True)
 
-            echo "🗂 LAST_FILE   = $LAST_FILE"
-            echo "⏱ LAST_TS     = $LAST_TS"
-          else
-            LAST_TS=$((CUR_TS - 3600))
-            LAST_JSON=""
-            echo "ℹ️ No previous files found"
-          fi
-
-          # ===============================
-          # 3️⃣ GUARANTEE EVERY HOUR
-          # ===============================
-          TS=$LAST_TS
-
-          while [ "$TS" -lt "$CUR_TS" ]; do
-            TS=$((TS + 3600))
-
-            D=$(date -d "@$TS" +"%Y-%m-%d")
-            H=$(date -d "@$TS" +"%H")
-
-            DIR="data/device/hourly/$D"
-            FILE="$DIR/$H-00.json"
-
-            mkdir -p "$DIR"
-
-            if [ -f "$FILE" ]; then
-              echo "✔ Exists $FILE"
-              continue
-            fi
-
-            echo "➕ Creating $FILE"
-
-            if [ "$API_OK" = true ]; then
-              echo "$RAW" | jq '.[0].lastData | {
-                timestamp: .date,
-                source: "ambientweather-api",
-
-                outdoor: {
-                  temperature: ((.tempf - 32) * 5 / 9),
-                  feelsLike: ((.feelsLike - 32) * 5 / 9),
-                  dewPoint: ((.dewPoint - 32) * 5 / 9),
-                  humidity: .humidity
-                },
-
-                wind: {
-                  speed: (.windspeedmph * 1.60934),
-                  gust: (.windgustmph * 1.60934),
-                  maxDailyGust: (.maxdailygust * 1.60934),
-                  directionDeg: .winddir
-                },
-
-                rain: {
-                  hourly: (.hourlyrainin * 25.4),
-                  daily: (.dailyrainin * 25.4),
-                  weekly: (.weeklyrainin * 25.4)
-                },
-
-                pressure: {
-                  relative: (.baromrelin * 33.8639),
-                  absolute: (.baromabsin * 33.8639)
-                },
-
-                indoor: {
-                  temperature: ((.tempinf - 32) * 5 / 9),
-                  humidity: .humidityin
-                },
-
-                solar: {
-                  uv: .uv,
-                  radiation: .solarradiation
-                }
-              }' > "$FILE"
-            else
-              if [ -n "$LAST_JSON" ]; then
-                echo "$LAST_JSON" | jq '. + { source: "carry-forward" }' > "$FILE"
-              else
-                echo "❌ No data available to carry forward"
-              fi
-            fi
-          done
+          with open(f"{path}/{hour_str}.json", "w") as f:
+              json.dump(averaged_data, f, indent=2)
+          print(f"File saved: {path}/{hour_str}.json")
+          EOF
 
       - name: Commit and push
         run: |
           git config user.name "goodearth-weather-bot"
           git config user.email "weather-bot@goodearth.internal"
           git add data/device/hourly
-          git commit -m "Guaranteed hourly weather snapshot (IST)" || echo "No changes"
+          git commit -m "Guaranteed hourly averaged weather snapshot (IST)" || echo "No changes"
           git push
