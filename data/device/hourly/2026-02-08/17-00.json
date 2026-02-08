@@ -1,0 +1,32 @@
+{
+  "timestamp": "2026-02-08T11:30:00.000Z",
+  "source": "ambientweather-averaged-60min",
+  "outdoor": {
+    "temperature": 29.24814814814815,
+    "feelsLike": 28.343333333333334,
+    "dewPoint": 11.539814814814816,
+    "humidity": 33.666666666666664
+  },
+  "wind": {
+    "speed": 3.0231451899999997,
+    "gust": 12.955187,
+    "directionDeg": 118.78333333333333
+  },
+  "rain": {
+    "hourly": 0.0,
+    "daily": 0.0,
+    "weekly": 0.0
+  },
+  "pressure": {
+    "relative": 1018.1497598066668,
+    "absolute": 927.6501802516667
+  },
+  "indoor": {
+    "temperature": 26.049999999999997,
+    "humidity": 39.86666666666667
+  },
+  "solar": {
+    "uv": 3.45,
+    "radiation": 409.86583333333334
+  }
+}
